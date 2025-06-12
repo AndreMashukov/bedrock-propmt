@@ -9,7 +9,7 @@ class WordGenerationApp:
         # Using Llama 3 70B Instruct model
         self.model_id = "meta.llama3-70b-instruct-v1:0"
 
-    def generate_words(self, language_name, num_words=5):
+    def generate_words(self, language_name):
         """
         Generate words in the specified language using Meta Llama model.
         
@@ -22,7 +22,7 @@ class WordGenerationApp:
         """
         # Define the prompt for word generation
         prompt = (
-            f"Generate {num_words} unique words that have a random number of characters more than 4 and less than 10 in {language_name} language. "
+            f"Generate 5 unique words that have a random number of characters more than 4 and less than 10 in {language_name} language. "
             "For each word, provide a brief description of its meaning in English with more than a couple of words. "
             "Produce output only in minified JSON array with the keys 'word' and 'description'. Word always must be in lowercase. "
             "Do not include any additional text, explanations, or formatting - only return the JSON array."
@@ -114,21 +114,10 @@ def main():
                 print("❌ Please enter a valid language name.")
                 continue
             
-            # Optional: Ask for number of words
-            try:
-                num_words_input = input("Enter number of words to generate (default: 5): ").strip()
-                num_words = int(num_words_input) if num_words_input else 5
-                if num_words < 1 or num_words > 20:
-                    print("⚠️  Using default of 5 words (valid range: 1-20)")
-                    num_words = 5
-            except ValueError:
-                print("⚠️  Invalid number, using default of 5 words")
-                num_words = 5
+            print(f"\n🔄 Generating 5 words in {language}...")
             
-            print(f"\n🔄 Generating {num_words} words in {language}...")
-            
-            # Generate words
-            result = app.generate_words(language, num_words)
+            # Generate words (always 5)
+            result = app.generate_words(language)
             
             # Display results
             app.print_words(result, language)
