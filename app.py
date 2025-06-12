@@ -1,42 +1,143 @@
-from aws_cdk import core as cdk
-from aws_cdk import aws_stepfunctions as sfn
-from aws_cdk import aws_stepfunctions_tasks as tasks
-from aws_cdk import aws_bedrock as bedrock
+import boto3
+import json
+from botocore.exceptions import ClientError
 
 class WordGenerationApp:
-    def __init__(self):
-        self.model = bedrock.FoundationModel.from_foundation_model_id(
-            self,
-            "BedrockModelLlama3",
-            bedrock.FoundationModelIdentifier.META_LLAMA_3_70_INSTRUCT_V1,
-        )
+    def __init__(self, region_name="us-east-1"):
+        """Initialize the Bedrock client."""
+        self.client = boto3.client("bedrock-runtime", region_name=region_name)
+        # Using Llama 3 70B Instruct model
+        self.model_id = "meta.llama3-70b-instruct-v1:0"
 
-    def generate_words(self, language_name):
+    def generate_words(self, language_name, num_words=5):
+        """
+        Generate words in the specified language using Meta Llama model.
+        
+        Args:
+            language_name (str): The language for word generation
+            num_words (int): Number of words to generate (default: 5)
+            
+        Returns:
+            list: List of dictionaries containing word and description
+        """
+        # Define the prompt for word generation
         prompt = (
-            "Generate 5 unique words that have a random number of characters more than 4 and less than 10 in {} language. "
+            f"Generate {num_words} unique words that have a random number of characters more than 4 and less than 10 in {language_name} language. "
             "For each word, provide a brief description of its meaning in English with more than a couple of words. "
-            "Produce output only in minified JSON array with the keys word and description. Word always must be in lowercase."
+            "Produce output only in minified JSON array with the keys 'word' and 'description'. Word always must be in lowercase. "
+            "Do not include any additional text, explanations, or formatting - only return the JSON array."
         )
 
-        task = tasks.BedrockInvokeModel(
-            self,
-            "GenerateWords",
-            model=self.model,
-            body=sfn.TaskInput.from_object(
-                {
-                    "prompt": prompt.format(language_name),
-                    "max_gen_len": 512,
-                    "temperature": 0.5,
-                    "top_p": 0.9,
-                }
-            ),
-        )
+        # Format the prompt using Llama 3's instruction format
+        formatted_prompt = f"""<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
 
-        return task
+        # Prepare the request payload
+        native_request = {
+            "prompt": formatted_prompt,
+            "max_gen_len": 512,
+            "temperature": 0.5,
+            "top_p": 0.9,
+        }
+
+        # Convert to JSON
+        request = json.dumps(native_request)
+
+        try:
+            # Invoke the model
+            response = self.client.invoke_model(modelId=self.model_id, body=request)
+            
+            # Decode the response
+            model_response = json.loads(response["body"].read())
+            
+            # Extract the generated text
+            response_text = model_response["generation"].strip()
+            
+            # Try to parse the JSON response
+            try:
+                words_data = json.loads(response_text)
+                return words_data
+            except json.JSONDecodeError:
+                # If direct parsing fails, try to extract JSON from the response
+                # Sometimes the model includes extra text
+                start_idx = response_text.find('[')
+                end_idx = response_text.rfind(']') + 1
+                if start_idx != -1 and end_idx != 0:
+                    json_str = response_text[start_idx:end_idx]
+                    words_data = json.loads(json_str)
+                    return words_data
+                else:
+                    print(f"Could not parse JSON from response: {response_text}")
+                    return []
+                    
+        except ClientError as e:
+            print(f"ERROR: Can't invoke '{self.model_id}'. Reason: {e}")
+            return []
+        except Exception as e:
+            print(f"ERROR: Unexpected error occurred. Reason: {e}")
+            return []
+
+    def print_words(self, words_data, language_name):
+        """Pretty print the generated words."""
+        if not words_data:
+            print("No words were generated.")
+            return
+            
+        print(f"\n🌟 Generated {len(words_data)} words in {language_name}:")
+        print("=" * 50)
+        
+        for i, word_info in enumerate(words_data, 1):
+            word = word_info.get('word', 'N/A')
+            description = word_info.get('description', 'No description available')
+            print(f"{i}. {word.upper()}")
+            print(f"   📝 {description}")
+            print()
+
+def main():
+    """Main function to run the word generator."""
+    print("🎯 AWS Bedrock Word Generator using Meta Llama")
+    print("=" * 50)
+    
+    # Initialize the app
+    app = WordGenerationApp()
+    
+    while True:
+        try:
+            # Get user input
+            language = input("\nEnter the language for word generation (or 'quit' to exit): ").strip()
+            
+            if language.lower() in ['quit', 'exit', 'q']:
+                print("👋 Goodbye!")
+                break
+                
+            if not language:
+                print("❌ Please enter a valid language name.")
+                continue
+            
+            # Optional: Ask for number of words
+            try:
+                num_words_input = input("Enter number of words to generate (default: 5): ").strip()
+                num_words = int(num_words_input) if num_words_input else 5
+                if num_words < 1 or num_words > 20:
+                    print("⚠️  Using default of 5 words (valid range: 1-20)")
+                    num_words = 5
+            except ValueError:
+                print("⚠️  Invalid number, using default of 5 words")
+                num_words = 5
+            
+            print(f"\n🔄 Generating {num_words} words in {language}...")
+            
+            # Generate words
+            result = app.generate_words(language, num_words)
+            
+            # Display results
+            app.print_words(result, language)
+            
+        except KeyboardInterrupt:
+            print("\n\n👋 Goodbye!")
+            break
+        except Exception as e:
+            print(f"❌ An error occurred: {e}")
 
 if __name__ == "__main__":
-    app = WordGenerationApp()
-    language = input("Enter the language for word generation: ")
-    print("Generating words...")
-    result = app.generate_words(language)
-    print("Generated words:", result)
+    main()
